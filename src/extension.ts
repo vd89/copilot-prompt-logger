@@ -42,6 +42,18 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	});
 
+	// Add debug command to check log file path
+	const checkLogPathCmd = vscode.commands.registerCommand('copilot-prompt-logger.checkLogPath', async () => {
+		const logFilePath = await logger.getLogFilePath();
+		vscode.window.showInformationMessage(`Log file path: ${logFilePath}`);
+
+		// Try to create a test log entry
+		await logger.logPrompt('Debug', 'Test Context', 'This is a test prompt from checkLogPath command');
+		vscode.window.showInformationMessage(`Test log written. Check file at: ${logFilePath}`);
+	});
+
+	context.subscriptions.push(checkLogPathCmd);
+
 	// Register a session start in the log file
 	logger.logSessionStart();
 

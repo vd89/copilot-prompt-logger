@@ -3,6 +3,7 @@
   "displayName": "copilot-prompt-logger",
   "description": "Log GitHub Copilot prompts to a Markdown file",
   "version": "0.0.1",
+  "publisher": "vscode-user",
   "engines": {
     "vscode": "^1.99.0"
   },
@@ -39,6 +40,10 @@
       {
         "command": "copilot-prompt-logger.captureCurrentInput",
         "title": "Capture Current Input as Copilot Prompt"
+      },
+      {
+        "command": "copilot-prompt-logger.checkLogPath",
+        "title": "Debug: Check Copilot Logger Path"
       }
     ],
     "views": {
@@ -83,6 +88,11 @@
           "type": "boolean",
           "default": true,
           "description": "Filter out system messages and processing logs"
+        },
+        "copilotPromptLogger.includeContext": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether to include context in logs"
         }
       }
     },

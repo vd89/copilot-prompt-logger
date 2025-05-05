@@ -49,4 +49,18 @@ export class ConfigManager {
   public getContextLines(): number {
     return this.config.get<number>('includeContextLines', 5);
   }
+
+  /**
+   * Check if context should be included in logs
+   */
+  public includeContext (): boolean {
+    return this.config.get<boolean>('includeContext', false);
+  }
+
+  /**
+   * Get the capture mode (userInputOnly, inputAndResponse, all)
+   */
+  public getCaptureMode (): string {
+    return this.config.get<string>('captureMode', 'userInputOnly');
+  }
 }

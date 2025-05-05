@@ -53,6 +53,7 @@ export class CopilotLogger {
       if (!fs.existsSync(logFilePath)) {
         const header = `# GitHub Copilot Prompts Log - ${new Date().toLocaleDateString()}\n\nThis file contains logs of prompts sent to GitHub Copilot.\n\n`;
         fs.writeFileSync(logFilePath, header, 'utf8');
+        console.log(`Created new log file at: ${logFilePath}`);
       }
 
       return logFilePath;
@@ -72,8 +73,17 @@ export class CopilotLogger {
     try {
       const logFilePath = await this.initLogFile();
 
+      // Force creating the directory if it doesn't exist (extra safety)
+      const dirPath = path.dirname(logFilePath);
+      if (!fs.existsSync(dirPath)) {
+        fs.mkdirSync(dirPath, { recursive: true });
+      }
+
       fs.appendFileSync(logFilePath, content, 'utf8');
       console.log(`Logged content to: ${logFilePath}`);
+
+      // Show a notification to confirm logging (helpful for debugging)
+      vscode.window.setStatusBarMessage(`Logged to ${path.basename(logFilePath)}`, 3000);
     } catch (error) {
       console.error('Failed to append to log file:', error);
       vscode.window.showErrorMessage(`Failed to append to log file: ${error}`);
@@ -119,6 +129,14 @@ export class CopilotLogger {
       return;
     }
 
+    const captureMode = this.configManager.getCaptureMode();
+
+    // If capture mode is not userInputOnly, don't filter responses
+    if (captureMode === 'userInputOnly' && this.looksLikeResponse(promptText)) {
+      console.log('Skipping content that looks like a response');
+      return;
+    }
+
     const timestamp = moment().format(this.configManager.getTimestampFormat());
     const relativePath = typeof fileName === 'string' ?
       vscode.workspace.asRelativePath(fileName, false) : 'Copilot Chat';
@@ -130,7 +148,8 @@ export class CopilotLogger {
     if (context &&
         context.trim() &&
         context !== promptText &&
-        !context.includes('User Input')) {
+      !context.includes('User Input') &&
+      this.configManager.includeContext()) {
       content += `#### Context\n\n\`\`\`\n${context}\n\`\`\`\n\n`;
     }
 
@@ -141,6 +160,50 @@ export class CopilotLogger {
     content += `---\n`;
 
     await this.appendToLog(content);
+    console.log(`Logged prompt: "${promptText.substring(0, 30)}..."`);
+  }
+
+  /**
+   * Determine if text looks like a response rather than user input
+   * This helps filter out Copilot responses that might be captured accidentally
+   */
+  private looksLikeResponse (text: string): boolean {
+    // Common patterns in Copilot responses
+    const responsePatterns = [
+      'I can help you with that',
+      'Here\'s how you can',
+      'You can use',
+      'GitHub Copilot',
+      'const',
+      'function',
+      'class',
+      'import',
+      '```typescript',
+      '```javascript',
+      '```python',
+      '```java',
+      'let me',
+      'You could'
+    ];
+
+    // Check if the text matches common response patterns
+    const lowerText = text.toLowerCase();
+
+    // If text is relatively long, has code formatting, or common response phrases
+    if (responsePatterns.some(pattern => lowerText.includes(pattern.toLowerCase()))) {
+      return true;
+    }
+
+    // If text starts with typical response beginnings
+    if (text.startsWith('Here') ||
+      text.startsWith('You can') ||
+      text.startsWith('Yes,') ||
+      text.startsWith('No,') ||
+      text.startsWith('I would')) {
+      return true;
+    }
+
+    return false;
   }
 
   /**
