@@ -35,6 +35,21 @@
 				"npm: watch-tests"
 			],
 			"problemMatcher": []
+		},
+		{
+			"type": "eslint",
+			"problemMatcher": [
+				"$eslint-stylish"
+			],
+			"label": "eslint: lint whole folder"
+		},
+		{
+			"type": "npm",
+			"script": "compile",
+			"group": "build",
+			"problemMatcher": [],
+			"label": "npm: compile",
+			"detail": "webpack"
 		}
 	]
 }

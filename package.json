@@ -9,15 +9,92 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished",
+    "*"
+    ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "copilot-prompt-logger.helloWorld",
         "title": "Hello World"
+      },
+      {
+        "command": "copilot-prompt-logger.enableLogging",
+        "title": "Enable Copilot Prompt Logging"
+      },
+      {
+        "command": "copilot-prompt-logger.disableLogging",
+        "title": "Disable Copilot Prompt Logging"
+      },
+      {
+        "command": "copilot-prompt-logger.openLogFile",
+        "title": "Open Copilot Prompts Log File"
+      },
+      {
+        "command": "copilot-prompt-logger.logPrompt",
+        "title": "Log Copilot Prompt"
+      },
+      {
+        "command": "copilot-prompt-logger.captureCurrentInput",
+        "title": "Capture Current Input as Copilot Prompt"
       }
-    ]
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "copilot-prompt-logger.captureView",
+          "name": "Copilot Prompt Capture",
+          "type": "webview"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Copilot Prompt Logger",
+      "properties": {
+        "copilotPromptLogger.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable or disable Copilot prompt logging"
+        },
+        "copilotPromptLogger.logFilePath": {
+          "type": "string",
+          "default": "copilot-prompts.md",
+          "description": "Path to the Copilot prompts log file (relative to workspace root)"
+        },
+        "copilotPromptLogger.timestampFormat": {
+          "type": "string",
+          "default": "YYYY-MM-DD HH:mm:ss",
+          "description": "Format for timestamps in the log file"
+        },
+        "copilotPromptLogger.includeContextLines": {
+          "type": "number",
+          "default": 5,
+          "description": "Number of code context lines to include in the log"
+        },
+        "copilotPromptLogger.captureMode": {
+          "type": "string",
+          "enum": ["userInputOnly", "inputAndResponse", "all"],
+          "default": "userInputOnly",
+          "description": "Control what content to capture from Copilot interactions"
+        },
+        "copilotPromptLogger.filterSystemMessages": {
+          "type": "boolean",
+          "default": true,
+          "description": "Filter out system messages and processing logs"
+        }
+      }
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "copilot-prompt-logger.logPrompt",
+          "group": "z_commands",
+          "when": "editorTextFocus"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
@@ -27,18 +104,24 @@
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
-    "lint": "eslint src",
-    "test": "vscode-test"
+    "lint": "eslint src --fix",
+    "test": "jest"
   },
   "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "@types/jest": "^29.5.14",
     "@types/mocha": "^10.0.10",
     "@types/node": "20.x",
+    "@types/sinon": "^17.0.4",
     "@types/vscode": "^1.99.0",
     "@typescript-eslint/eslint-plugin": "^8.31.1",
     "@typescript-eslint/parser": "^8.31.1",
     "@vscode/test-cli": "^0.0.10",
     "@vscode/test-electron": "^2.5.2",
     "eslint": "^9.25.1",
+    "jest": "^29.7.0",
+    "sinon": "^20.0.0",
+    "ts-jest": "^29.3.2",
     "ts-loader": "^9.5.2",
     "typescript": "^5.8.3",
     "webpack": "^5.99.7",
