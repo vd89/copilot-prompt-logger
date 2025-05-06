@@ -4,13 +4,11 @@ import * as fs from 'fs';
 import { CopilotLogger } from './logger';
 import { ConfigManager } from './config';
 import { CopilotApiInterceptor } from './copilot-api';
-import { CopilotWebviewListener } from './copilot-webview-listener';
 
 let logger: CopilotLogger;
 let configManager: ConfigManager;
 let statusBarItem: vscode.StatusBarItem;
 let copilotListenersDisposable: vscode.Disposable | null = null;
-let webviewListenerDisposable: vscode.Disposable | null = null;
 
 export function activate (context: vscode.ExtensionContext) {
 	// Initialize the configuration manager
@@ -35,12 +33,7 @@ export function activate (context: vscode.ExtensionContext) {
 		}
 
 		// Set up webview listener for chat interface
-		if (!webviewListenerDisposable) {
-			logger.logDiagnostic('Setting up Copilot WebView listener');
-			const webviewListener = new CopilotWebviewListener(logger);
-			webviewListenerDisposable = webviewListener.register();
-			context.subscriptions.push(webviewListenerDisposable);
-		}
+
 	});
 
 	const disableLoggingCmd = vscode.commands.registerCommand('copilot-prompt-logger.disableLogging', () => {
@@ -54,10 +47,6 @@ export function activate (context: vscode.ExtensionContext) {
 			copilotListenersDisposable = null;
 		}
 
-		if (webviewListenerDisposable) {
-			webviewListenerDisposable.dispose();
-			webviewListenerDisposable = null;
-		}
 	});
 
 	const openLogFileCmd = vscode.commands.registerCommand('copilot-prompt-logger.openLogFile', async () => {
@@ -88,17 +77,13 @@ export function activate (context: vscode.ExtensionContext) {
 		// Setup editor text change monitoring
 		copilotListenersDisposable = setupCopilotListeners(context);
 
-		// Setup chat interface monitoring
-		const webviewListener = new CopilotWebviewListener(logger);
-		webviewListenerDisposable = webviewListener.register();
+
 
 		// Add the monitor DOM command for additional capture method
-		const monitorDOMDisposable = webviewListener.monitorWebviewDOM();
 
 		context.subscriptions.push(
 			copilotListenersDisposable,
-			webviewListenerDisposable,
-			monitorDOMDisposable
+
 		);
 	}
 
@@ -245,7 +230,7 @@ export function deactivate () {
 }
 
 // Improved function for monitoring editor changes that might be Copilot prompts
-function setupCopilotListeners (context: vscode.ExtensionContext): vscode.Disposable {
+function setupCopilotListeners (_context: vscode.ExtensionContext): vscode.Disposable {
 	const disposables: vscode.Disposable[] = [];
 
 	// Listen for text document changes
@@ -315,19 +300,17 @@ function setupCopilotListeners (context: vscode.ExtensionContext): vscode.Dispos
 	});
 
 	// Listen for Copilot chat panels if possible
-	try {
-		// Look for the Copilot webview
-		const chatViewListener = vscode.window.registerWebviewViewProvider('github.copilot.chat', {
-			resolveWebviewView: (webviewView) => {
-				logger.logDiagnostic('Resolved Copilot chat webview!');
-				// Now we could potentially inject scripts
-			}
-		});
-		disposables.push(chatViewListener);
-	} catch (error) {
-		// Copilot chat view provider might not be available
-		logger.logDiagnostic(`Could not register for chat view: ${error}`);
-	}
+	const chatPanelListener = vscode.window.onDidChangeActiveTextEditor(editor => {
+		if (!configManager.isEnabled()) { return; }
+
+		if (editor && editor.document.languageId === 'copilot-chat') {
+			// This is a Copilot chat panel, we can monitor it
+			// For now, we just log the active editor change
+			logger.logDiagnostic('Active editor changed to Copilot chat panel');
+		}
+	});
+	disposables.push(selectionChangeListener);
+	disposables.push(chatPanelListener);
 
 	return vscode.Disposable.from(...disposables);
 }
