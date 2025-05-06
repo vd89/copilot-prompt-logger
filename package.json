@@ -13,14 +13,10 @@
   "activationEvents": [
     "onStartupFinished",
     "*"
-    ],
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
-      {
-        "command": "copilot-prompt-logger.helloWorld",
-        "title": "Hello World"
-      },
       {
         "command": "copilot-prompt-logger.enableLogging",
         "title": "Enable Copilot Prompt Logging"
@@ -38,12 +34,16 @@
         "title": "Log Copilot Prompt"
       },
       {
-        "command": "copilot-prompt-logger.captureCurrentInput",
-        "title": "Capture Current Input as Copilot Prompt"
-      },
-      {
         "command": "copilot-prompt-logger.checkLogPath",
         "title": "Debug: Check Copilot Logger Path"
+      },
+      {
+        "command": "copilot-prompt-logger.logUserPrompt",
+        "title": "Log User Prompt to Copilot"
+      },
+      {
+        "command": "copilot-prompt-logger.captureFromClipboard",
+        "title": "Capture Prompt from Clipboard"
       }
     ],
     "views": {
@@ -80,8 +80,12 @@
         },
         "copilotPromptLogger.captureMode": {
           "type": "string",
-          "enum": ["userInputOnly", "inputAndResponse", "all"],
-          "default": "userInputOnly",
+          "enum": [
+            "userInputOnly",
+            "inputAndResponse",
+            "all"
+          ],
+          "default": "inputAndResponse",
           "description": "Control what content to capture from Copilot interactions"
         },
         "copilotPromptLogger.filterSystemMessages": {
@@ -93,6 +97,26 @@
           "type": "boolean",
           "default": false,
           "description": "Whether to include context in logs"
+        },
+        "copilotPromptLogger.useDateBasedNaming": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use date-based log file naming (prompt-log-YYYY-MM-DD.md)"
+        },
+        "copilotPromptLogger.debugMode": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable debug logging for troubleshooting file operations"
+        },
+        "copilotPromptLogger.alternateLogLocation": {
+          "type": "string",
+          "default": "",
+          "description": "Alternative location for log files if workspace location has issues"
+        },
+        "copilotPromptLogger.minimalLogging": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use minimal format in logs (only prompt and filename)"
         }
       }
     },

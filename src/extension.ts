@@ -1,35 +1,63 @@
 // src/extension.ts
 import * as vscode from 'vscode';
 import * as fs from 'fs';
-import * as path from 'path';
 import { CopilotLogger } from './logger';
 import { ConfigManager } from './config';
 import { CopilotApiInterceptor } from './copilot-api';
+import { CopilotWebviewListener } from './copilot-webview-listener';
 
 let logger: CopilotLogger;
 let configManager: ConfigManager;
 let statusBarItem: vscode.StatusBarItem;
+let copilotListenersDisposable: vscode.Disposable | null = null;
+let webviewListenerDisposable: vscode.Disposable | null = null;
 
-export function activate(context: vscode.ExtensionContext) {
-	console.log('Copilot Prompt Logger extension is now active!');
-
+export function activate (context: vscode.ExtensionContext) {
 	// Initialize the configuration manager
 	configManager = new ConfigManager();
 
 	// Initialize the logger
 	logger = new CopilotLogger(configManager);
 
+	// Log diagnostic info
+	logger.logDiagnostic('Extension activated');
+
 	// Register commands
 	const enableLoggingCmd = vscode.commands.registerCommand('copilot-prompt-logger.enableLogging', () => {
 		configManager.setEnabled(true);
 		vscode.window.showInformationMessage('Copilot Prompt Logging is now enabled.');
 		updateStatusBar();
+
+		// Set up Copilot listeners when logging is enabled
+		if (!copilotListenersDisposable) {
+			logger.logDiagnostic('Setting up Copilot listeners');
+			copilotListenersDisposable = setupCopilotListeners(context);
+		}
+
+		// Set up webview listener for chat interface
+		if (!webviewListenerDisposable) {
+			logger.logDiagnostic('Setting up Copilot WebView listener');
+			const webviewListener = new CopilotWebviewListener(logger);
+			webviewListenerDisposable = webviewListener.register();
+			context.subscriptions.push(webviewListenerDisposable);
+		}
 	});
 
 	const disableLoggingCmd = vscode.commands.registerCommand('copilot-prompt-logger.disableLogging', () => {
 		configManager.setEnabled(false);
 		vscode.window.showInformationMessage('Copilot Prompt Logging is now disabled.');
 		updateStatusBar();
+
+		// Dispose of Copilot listeners when logging is disabled
+		if (copilotListenersDisposable) {
+			copilotListenersDisposable.dispose();
+			copilotListenersDisposable = null;
+		}
+
+		if (webviewListenerDisposable) {
+			webviewListenerDisposable.dispose();
+			webviewListenerDisposable = null;
+		}
 	});
 
 	const openLogFileCmd = vscode.commands.registerCommand('copilot-prompt-logger.openLogFile', async () => {
@@ -52,47 +80,64 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.window.showInformationMessage(`Test log written. Check file at: ${logFilePath}`);
 	});
 
-	context.subscriptions.push(checkLogPathCmd);
-
 	// Register a session start in the log file
 	logger.logSessionStart();
 
-	// Set up event listeners for Copilot
-	setupCopilotListeners(context);
+	// Setup both text editor and webview listeners
+	if (configManager.isEnabled()) {
+		// Setup editor text change monitoring
+		copilotListenersDisposable = setupCopilotListeners(context);
 
-	// Add Copilot API interceptor
+		// Setup chat interface monitoring
+		const webviewListener = new CopilotWebviewListener(logger);
+		webviewListenerDisposable = webviewListener.register();
+
+		// Add the monitor DOM command for additional capture method
+		const monitorDOMDisposable = webviewListener.monitorWebviewDOM();
+
+		context.subscriptions.push(
+			copilotListenersDisposable,
+			webviewListenerDisposable,
+			monitorDOMDisposable
+		);
+	}
+
+	// Add Copilot API interceptor for alternative capture methods
 	const apiInterceptor = new CopilotApiInterceptor(logger);
 	const hookSuccess = apiInterceptor.tryHookCopilotApi();
 
 	if (hookSuccess) {
-		vscode.window.showInformationMessage('Copilot API hook successful');
+		logger.logDiagnostic('Copilot API hook successful');
 	} else {
-		console.log('Could not hook into Copilot API directly, using fallback methods');
+		logger.logDiagnostic('Could not hook into Copilot API directly, using fallback methods');
 		// Start polling as a fallback
 		const pollingDisposable = apiInterceptor.startPollingForChatInput();
 		context.subscriptions.push(pollingDisposable);
 	}
 
-	// Register a special handler for clipboard content
-	const clipboardHandler = vscode.commands.registerCommand('copilot-prompt-logger.checkClipboard', async () => {
+	// Register a command to capture input from clipboard
+	const captureClipboardCmd = vscode.commands.registerCommand('copilot-prompt-logger.captureFromClipboard', async () => {
 		try {
-			const text = await vscode.env.clipboard.readText();
-			if (text && text.length > 10) {
-				logger.logPrompt('Clipboard', 'Manual Clipboard Check', text);
-				vscode.window.showInformationMessage('Clipboard content logged as potential prompt');
+			const clipboardText = await vscode.env.clipboard.readText();
+			if (clipboardText && clipboardText.length > 5) {
+				await logger.logUserInput('Clipboard', clipboardText);
+				vscode.window.showInformationMessage('Captured prompt from clipboard');
+			} else {
+				vscode.window.showInformationMessage('Clipboard is empty or too short');
 			}
 		} catch (error) {
-			console.error('Failed to access clipboard:', error);
+			console.error('Failed to read clipboard:', error);
+			vscode.window.showErrorMessage('Failed to read from clipboard');
 		}
 	});
-
-	context.subscriptions.push(clipboardHandler);
 
 	// Add configs, commands, and handlers to context subscriptions
 	context.subscriptions.push(
 		enableLoggingCmd,
 		disableLoggingCmd,
-		openLogFileCmd
+		openLogFileCmd,
+		checkLogPathCmd,
+		captureClipboardCmd
 	);
 
 	// Register event listeners for configuration changes
@@ -105,12 +150,41 @@ export function activate(context: vscode.ExtensionContext) {
 		})
 	);
 
-	// Create a status bar item
+	// Create a status bar item with context menu
 	statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
 	updateStatusBar();
-	statusBarItem.command = 'copilot-prompt-logger.openLogFile';
+	statusBarItem.command = 'copilot-prompt-logger.statusBarClick';
+	statusBarItem.tooltip = 'Copilot Prompt Logger (click for options)';
 	statusBarItem.show();
 	context.subscriptions.push(statusBarItem);
+
+	// Register status bar click command to show quick menu
+	const statusBarClickCmd = vscode.commands.registerCommand('copilot-prompt-logger.statusBarClick', () => {
+		// Show quick menu with common operations
+		vscode.window.showQuickPick([
+			'Toggle Logging',
+			'Open Log File',
+			'Capture from Clipboard',
+			'Reconnect to Chat'
+		], {
+			placeHolder: 'Copilot Prompt Logger Options'
+		}).then(selected => {
+			if (selected === 'Toggle Logging') {
+				const newValue = !configManager.isEnabled();
+				configManager.setEnabled(newValue);
+				updateStatusBar();
+				vscode.window.showInformationMessage(`Copilot Prompt Logging is now ${newValue ? 'enabled' : 'disabled'}`);
+			} else if (selected === 'Open Log File') {
+				vscode.commands.executeCommand('copilot-prompt-logger.openLogFile');
+			} else if (selected === 'Capture from Clipboard') {
+				vscode.commands.executeCommand('copilot-prompt-logger.captureFromClipboard');
+			} else if (selected === 'Reconnect to Chat') {
+				vscode.commands.executeCommand('copilot-prompt-logger.reconnectWebsocket');
+			}
+		});
+	});
+
+	context.subscriptions.push(statusBarClickCmd);
 
 	// Create new command to manually log a prompt
 	let logPromptCommand = vscode.commands.registerCommand('copilot-prompt-logger.logPrompt', async () => {
@@ -130,10 +204,29 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 
 	context.subscriptions.push(logPromptCommand);
+
+	// Add the 'logUserPrompt' command - simplified version for user-triggered logging
+	const logUserPromptCmd = vscode.commands.registerCommand('copilot-prompt-logger.logUserPrompt', async () => {
+		const prompt = await vscode.window.showInputBox({
+			placeHolder: 'Enter your Copilot prompt',
+			prompt: 'Log a prompt to the prompt log file'
+		});
+
+		if (prompt) {
+			const editor = vscode.window.activeTextEditor;
+			const fileName = editor ? editor.document.fileName : 'Manual Entry';
+
+			// Use the simplified method for user inputs
+			await logger.logUserInput(fileName, prompt);
+			vscode.window.showInformationMessage('User prompt logged successfully!');
+		}
+	});
+
+	context.subscriptions.push(logUserPromptCmd);
 }
 
 function updateStatusBar () {
-	if (!statusBarItem) { return; };
+	if (!statusBarItem) { return; }
 
 	if (configManager.isEnabled()) {
 		statusBarItem.text = "$(github-copilot) Logger: On";
@@ -144,148 +237,97 @@ function updateStatusBar () {
 	}
 }
 
-function setupCopilotListeners (context: vscode.ExtensionContext) {
-	// Listen for specific Copilot commands
-	const commandListener = vscode.commands.registerCommand('github.copilot.chat.sendRequest', async (prompt: string) => {
-		if (configManager.isEnabled() && prompt) {
-			// Only log actual user chat inputs
-			logger.logPrompt('Copilot Chat', 'User Input', prompt);
-		}
-		return prompt;
-	});
-
-	context.subscriptions.push(commandListener);
-
-	// Use a more targeted approach to intercept Copilot commands
-	const originalExecuteCommand = vscode.commands.executeCommand;
-	// @ts-ignore - Replace the executeCommand function with our proxy
-	vscode.commands.executeCommand = function (command, ...args) {
-		if (configManager.isEnabled()) {
-			// Only capture specific Copilot chat-related commands
-			if (command === 'github.copilot.chat.sendRequest' ||
-				command === 'github.copilot.interactiveSession.request') {
-
-				// Only capture if the first argument is a string (the user's input)
-				if (args && args.length > 0 && typeof args[ 0 ] === 'string') {
-					const userInput = args[ 0 ];
-					// Don't log system messages or empty inputs
-					if (userInput && !userInput.startsWith('system:') && userInput.trim()) {
-						logger.logPrompt('Copilot Chat', 'User Input', userInput.trim());
-					}
-				}
-			}
-		}
-		return originalExecuteCommand.apply(vscode.commands, [ command, ...args ]);
-	};
-
-	// Setup a simple editor input listener for chat panels
-	const inputBoxWatcher = vscode.window.onDidChangeActiveTextEditor((editor) => {
-		if (!configManager.isEnabled() || !editor) { return; };
-
-		// Only focus on input boxes in Copilot panels
-		if (editor.document.uri.scheme === 'memento' ||
-			editor.document.uri.path.includes('copilot-chat-input')) {
-
-			// Get the current document text
-			const text = editor.document.getText();
-
-			// We'll watch this document for changes
-			const disposable = vscode.workspace.onDidChangeTextDocument((e) => {
-				if (e.document === editor.document) {
-					const currentText = e.document.getText();
-					if (currentText && currentText !== text && currentText.trim()) {
-						// Only log when user presses Enter/submits - not every keystroke
-						vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup').then(() => {
-							if (currentText.endsWith('\n') && currentText.trim()) {
-								logger.logPrompt('Copilot Chat', 'User Input', currentText.trim());
-							}
-						});
-					}
-				}
-			});
-
-			// Clean up when editor changes
-			context.subscriptions.push(disposable);
-		}
-	});
-
-	context.subscriptions.push(inputBoxWatcher);
-
-	// Create a webview panel to monitor focus and capture clipboard on submit
-	let webviewProvider = vscode.window.registerWebviewViewProvider('copilot-prompt-logger.captureView', {
-		resolveWebviewView (webviewView) {
-			// Make the webview capture clipboard when Copilot is used
-			webviewView.webview.html = `
-				<html>
-				<body>
-					<div>Monitoring for Copilot prompts...</div>
-					<script>
-						window.addEventListener('focus', () => {
-							// When focus returns to VS Code (after user submits to Copilot)
-							navigator.clipboard.readText().then(text => {
-								if (text && text.length > 5) {
-									// Send captured text to extension
-									vscode.postMessage({ type: 'clipboardContent', content: text });
-								}
-							});
-						});
-					</script>
-				</body>
-				</html>
-			`;
-
-			webviewView.webview.onDidReceiveMessage(message => {
-				if (message.type === 'clipboardContent') {
-					logger.logPrompt('Clipboard Capture', 'User Input', message.content);
-				}
-			});
-		}
-	});
-
-	context.subscriptions.push(webviewProvider);
-
-	// Listen for text document changes but be very selective
-	const textDocChangeListener = vscode.workspace.onDidChangeTextDocument(event => {
-		if (!configManager.isEnabled()) { return; };
-
-		// Only consider specific documents that might be Copilot-related
-		if (event.document.fileName.includes('copilot') ||
-			event.document.uri.scheme === 'copilot-chat') {
-
-			// Only consider significant changes
-			const changes = event.contentChanges;
-
-			if (changes.length > 0) {
-				// We're looking for user input patterns, not machine-generated content
-				for (const change of changes) {
-					// Only consider reasonably sized inputs that might be user prompts
-					// and ignore markdown formatting
-					if (change.text &&
-						change.text.length > 5 &&
-						change.text.length < 1000 &&
-						!change.text.includes('```') &&
-						!change.text.includes('Copilot Prompts Log')) {
-
-						// Check if this appears to be an actual user input
-						const isUserInput = !change.text.includes('session') &&
-							!change.text.startsWith('#') &&
-							!change.text.includes('context');
-
-						if (isUserInput) {
-							logger.logPrompt('User Input', '', change.text.trim());
-						}
-					}
-				}
-			}
-		}
-	});
-
-	context.subscriptions.push(textDocChangeListener);
-}
-
 export function deactivate () {
 	// Log session end when extension is deactivated
 	if (logger) {
 		logger.logSessionEnd();
 	}
+}
+
+// Improved function for monitoring editor changes that might be Copilot prompts
+function setupCopilotListeners (context: vscode.ExtensionContext): vscode.Disposable {
+	const disposables: vscode.Disposable[] = [];
+
+	// Listen for text document changes
+	const textChangeListener = vscode.workspace.onDidChangeTextDocument(event => {
+		if (!configManager.isEnabled()) { return; }
+
+		const editor = vscode.window.activeTextEditor;
+		if (!editor || event.document !== editor.document) { return; }
+
+		// Skip log files and non-code files
+		if (editor.document.fileName.includes('prompt-log') ||
+			editor.document.fileName.endsWith('.md')) {
+			return;
+		}
+
+		// Process each change
+		for (const change of event.contentChanges) {
+			// Look for likely human-authored prompts
+			if (change.text &&
+				change.text.trim().length > 5 &&
+				change.text.trim().length < 200) {
+
+				// Check for typical prompt patterns
+				const isLikelyPrompt =
+					// Questions are often prompts
+					change.text.includes('?') ||
+					// Command-like starts
+					/^(add|create|update|write|generate|fix|implement|refactor|optimize|show)/i.test(change.text) ||
+					// Single line inputs that look like instructions
+					(change.text.split('\n').length <= 2 && /^[A-Z].*[.!?]$/.test(change.text));
+
+				if (isLikelyPrompt) {
+					logger.logUserInput(editor.document.fileName, change.text);
+				}
+			}
+		}
+	});
+
+	disposables.push(textChangeListener);
+
+	// Also listen for selection changes to capture multi-line selections
+	const selectionChangeListener = vscode.window.onDidChangeTextEditorSelection(event => {
+		if (!configManager.isEnabled()) { return; }
+
+		const editor = event.textEditor;
+
+		// Check if selection is significant and looks like it might be a prompt
+		if (editor && editor.selection && !editor.selection.isEmpty) {
+			const selectedText = editor.document.getText(editor.selection);
+
+			// Only consider selections that are reasonably sized and look like prompts
+			if (selectedText &&
+				selectedText.length > 15 &&
+				selectedText.length < 500 &&
+				// Look for likely comment starts or question marks
+				(selectedText.includes('?') ||
+					selectedText.trim().startsWith('//') ||
+					selectedText.trim().startsWith('/*') ||
+					selectedText.trim().startsWith('#'))) {
+
+				// We don't log immediately to avoid spam
+				// Instead, we could add selection to a candidate list
+				// and log if the user does something like press Enter or Ctrl+Enter
+				// This would require more complex key binding tracking
+			}
+		}
+	});
+
+	// Listen for Copilot chat panels if possible
+	try {
+		// Look for the Copilot webview
+		const chatViewListener = vscode.window.registerWebviewViewProvider('github.copilot.chat', {
+			resolveWebviewView: (webviewView) => {
+				logger.logDiagnostic('Resolved Copilot chat webview!');
+				// Now we could potentially inject scripts
+			}
+		});
+		disposables.push(chatViewListener);
+	} catch (error) {
+		// Copilot chat view provider might not be available
+		logger.logDiagnostic(`Could not register for chat view: ${error}`);
+	}
+
+	return vscode.Disposable.from(...disposables);
 }

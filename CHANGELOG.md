@@ -14,3 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Log prompts with timestamp, file context, and prompt text
 - Add configuration options for logging preferences
 - Add commands for enabling/disabling logging and opening the log file
+
+## [0.2.0] - YYYY-MM-DD
+
+### Added
+- Configuration options for enabling/disabling logging, customizing the log file path, and timestamp format.
+- Improved error handling for file operations.
+- Updated documentation with configuration details and usage examples.

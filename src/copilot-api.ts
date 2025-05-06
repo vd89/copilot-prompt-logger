@@ -29,7 +29,7 @@ export class CopilotApiInterceptor {
             console.log('GitHub Copilot extension found');
 
             // Monitor clipboard for user inputs
-            this.setupClipboardMonitoring();
+            // this.setupClipboardMonitoring();
 
             this.isHooked = true;
             return true;
